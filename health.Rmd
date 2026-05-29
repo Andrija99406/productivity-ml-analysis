@@ -1,0 +1,860 @@
+---
+title: "Machine Learning Analysis of Productivity Determinants using Behavioral Data"
+author: "<h2 class='author'>Andrija Radojević</h2>"
+subtitle: "<h3 class='subtitle'>Faculty of Mathematics</h3>"
+output:
+  html_document:
+    css: style2.css
+---
+
+
+<h1 class="custom-title">Productivity: Key Influencing Factors and Model Robustness</h1>
+
+
+<div class="mini-discussion ">
+
+We investigate the key behavioral and psychological factors that predict individual productivity and evaluate the robustness of linear and regularized regression models under cross-validation.
+
+</div>
+<div class="m1">
+
+Data preparation
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+#loading dataset and reading first few lines
+
+library(dplyr)
+library(data.table)
+a<- fread("ScreenTime vs MentalWellness.csv")
+
+head(a)
+
+```
+
+
+
+```{r,message=FALSE,warning=FALSE}
+summary(a)             #descriptive statistics
+
+
+```
+
+
+```{r,message=FALSE,warning=FALSE}
+
+b<- a %>%
+  select(where(~ !all(is.na(.))))                          #deleting NA
+
+b<-b%>% select(-user_id)                                    #deleting column user_id
+attach(b)
+
+
+```
+
+```{r,message=FALSE,warning=FALSE}
+#converting categorical variables to factors
+age<-as.factor(age)
+occupation<-as.factor(occupation)
+gender<-as.factor(gender)
+work_mode<-as.factor(work_mode)
+
+
+```
+<div class="t1"         >
+
+We will try fitting the first model. For the first three models, we will select predictors that seem the most interesting and most strongly related to productivity.
+
+</div>
+<div class="m1">
+
+Exploratory Data Analysis
+</div>
+
+```{r}
+
+hist(b$productivity_0_100, main="Distribution of Productivity", xlab="Productivity")
+hist(b$stress_level_0_10)
+hist(b$mental_wellness_index_0_100)
+
+
+```
+```{r,message=FALSE,warning=FALSE}
+
+library(corrplot)                           #correlation matrix
+
+num_vars <- b %>% select_if(is.numeric)
+cor_mat <- cor(num_vars)
+
+corrplot(cor_mat, method="color", tl.cex=0.7)
+
+
+
+```
+<div class="t1"         >
+
+This correlation matrix reveals the relationships between behavioral, lifestyle, and wellness variables. Strong positive correlations are observed between screen_time_hours and its components (work_screen_hours and leisure_screen_hours), while stress_level_0_10 shows a strong negative correlation with mental_wellness_index_0_100, indicating higher stress is associated with lower mental wellness. Additionally, sleep_hours is positively correlated with sleep_quality_1_5 and moderately negatively correlated with stress_level_0_10, suggesting better sleep supports lower stress. Overall, these patterns highlight key behavioral factors influencing mental wellness, providing a foundation for predictive modeling or intervention analysis.
+
+</div>
+
+<div class="m1">
+
+Baseline linear specification
+</div>
+
+<div class="t1">
+The analysis follows a structured machine learning pipeline. Models are evaluated using cross-validated RMSE to ensure generalization, and developed in a sequential manner from feature exploration to a final regularized specification.
+</div>
+
+<div class="s1">
+
+Model 1
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+#our goal is to fit best lm model
+
+#We will use cross-validation to determine which model has the best metrics, and then we will evaluate it on the test set
+
+N<-nrow(b)
+
+set.seed(123)
+library(caret)
+
+
+train_index <- createDataPartition(b$productivity_0_100, p = 0.8, list = FALSE)
+train_data <- b[train_index, ]
+test_data  <- b[-train_index, ]
+
+
+
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+#We train a linear model using cross-validation
+model1 <- train(
+  productivity_0_100~stress_level_0_10+sleep_quality_1_5,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE"  
+)
+summary(model1)
+#Looking at the cross-validation results
+model1$results
+
+
+pred_df <- model1$pred
+ggplot(pred_df, aes(x=obs, y=pred)) + 
+  geom_point() + 
+  geom_abline(slope=1, intercept=0, color="red") +
+  theme_minimal()
+
+
+```
+<div class="t1"         >
+
+We examine this summary for the coefficients, while below we have the metrics that will be used to compare with subsequent models. Both predictors appear to be significant for the outcome, as indicated by the three stars and low p-values. Stress level has a negative effect on productivity, whereas sleep quality has a positive effect, which aligns with expectations.
+
+</div>
+
+
+```{r}
+
+plot(productivity_0_100~stress_level_0_10,data=train_data)   
+plot(productivity_0_100~sleep_quality_1_5,data=train_data)
+plot(productivity_0_100~work_screen_hours,data=train_data)
+
+```
+<div class="t1"         >
+
+We plot these scatterplots to assess whether the selected factors exhibit a linear relationship with the dependent variable before including them in the model.
+
+</div>
+<div class="s1">
+
+Model 2
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+
+
+set.seed(123)
+
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+# We train a linear model using cross-validation
+model2 <- train(
+  productivity_0_100~stress_level_0_10+sleep_quality_1_5+work_screen_hours,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE"  
+)
+summary(model2)
+#Looking at the cross-validation results
+model2$results
+
+
+```
+<div class="t1"         >
+
+We observe that the plot does not show a pronounced linear relationship for the working_hours variable, yet the model summary suggests otherwise.
+</div>
+
+<div class="s1">
+
+Model 3
+</div>
+```{r,message=FALSE,warning=FALSE}
+library(car)
+
+plot(productivity_0_100~screen_time_hours,data=train_data)
+
+set.seed(123)
+
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+#We train a linear model using cross-validation
+model3 <- train(
+  productivity_0_100~stress_level_0_10+sleep_quality_1_5+screen_time_hours,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE"  
+)
+
+summary(model3)
+#Looking at the cross-validation results
+model3$results
+
+```
+<div class="t1"         >
+
+We add a new variable, screen_time_hours, which also appears to be highly significant (three stars). However, we will now adopt a more precise approach: we will fit a model including all variables and then remove them sequentially to arrive at the best model.
+
+</div>
+<div class="m1">
+
+Feature selection and model refinement
+</div>
+
+<div class="s1">
+
+Model 4
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+
+#with all predictors now
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+# We train a linear model using cross-validation
+model4 <- train(
+  productivity_0_100~.,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE"  
+)
+summary(model4)
+#Looking at the cross-validation results
+model4$results
+
+```
+<div class="t1"         >
+
+We already observe a higher R², along with lower RMSE and MAE. However, many predictors are not directly related to, nor do they have a significant effect on, the dependent variable. Therefore, we will remove them to improve the model and reduce variance.
+</div>
+
+<div class="s1">
+
+Model 5
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+
+#We will now remove leisure and the other variables one by one until only the important variables remain
+
+set.seed(123)
+
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+#We train a linear model using cross-validation
+model5 <- train(
+  productivity_0_100~ . -leisure_screen_hours - work_screen_hours - sleep_hours - social_hours_per_week - age - gender - work_mode,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE" 
+)
+summary(model5)
+
+#Looking at the cross-validation results
+model5$results
+
+```
+<div class="t1"         >
+
+We have again obtained a better model, which makes sense given that we removed independent variables unrelated to the outcome. However, there is still room for improvement—for example, we notice the variable occupation.
+</div>
+
+<div class="s1">
+
+Model 6
+</div>
+```{r,message=FALSE,warning=FALSE}
+#Since we observe that only a few levels of the occupation variable, such as self-employed, appear significant, we will first remove the occupation variable entirely from the model
+
+set.seed(123)
+
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+# We train a linear model using cross-validation
+model6 <- train(
+  productivity_0_100~ . -leisure_screen_hours - work_screen_hours - sleep_hours - social_hours_per_week - age - gender - work_mode - occupation,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE"  
+)
+summary(model6)
+
+#Looking at the cross-validation results
+model6$results
+
+```
+<div class="t1"         >
+
+We remove the occupation variable entirely, as none of its categories—except for self-employed show a meaningful effect on the outcome. Doing so also improves the model's performance, as reflected in the cross-validation averages.
+</div>
+
+<div class="s1">
+
+Model 7
+</div>
+
+<div class="t1"         >
+
+To avoid losing potentially informative structure within the occupation variable, we additionally encode a binary indicator for self-employment status.
+</div>
+```{r,message=FALSE,warning=FALSE}
+
+
+train_data$self_employed <- ifelse(train_data$occupation == "Self-employed", 1, 0)
+
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+# We train a linear model using cross-validation
+model7 <- train(
+  (productivity_0_100)~ . -leisure_screen_hours - work_screen_hours - sleep_hours - social_hours_per_week - age - gender - work_mode - occupation + self_employed,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE" 
+)
+summary(model7)
+
+#Looking at the cross-validation results
+model7$results
+
+
+```
+
+<div class="t1"         >
+
+Model 7 achieves the best cross-validated performance among the tested specifications and is selected for further analysis.
+</div>
+
+<div class="m1">
+
+Robustness and extended modeling
+</div>
+<div class="s1">
+
+Model 8
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+#removing sleep quality from the model, as it is correlated with mental health
+cor(train_data$sleep_quality_1_5, train_data$mental_wellness_index_0_100)
+set.seed(123)
+
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+# We train a linear model using cross-validation
+model8 <- train(
+  productivity_0_100~ . -leisure_screen_hours - work_screen_hours - sleep_hours - social_hours_per_week - age - gender - work_mode - occupation + self_employed -sleep_quality_1_5,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE"  
+)
+summary(model8)
+
+# Looking at the cross-validation results
+model8$results
+
+
+```
+<div class="t1"         >
+
+Sleep quality was removed due to its strong correlation with the mental wellness index, which may introduce multicollinearity and reduce the stability of coefficient estimates. Both models perform similarly in terms of predictive accuracy, with Model 1 achieving slightly better RMSE, R², and MAE, while Model 2 shows slightly lower variability in cross-validation metrics.
+</div>
+
+
+```{r,message=FALSE,warning=FALSE}
+#Next, we examine potential outliers using boxplots for the remaining predictors in the model
+
+xb <- cbind(
+  train_data$screen_time_hours,
+  train_data$stress_level_0_10,
+  train_data$exercise_minutes_per_week,
+  train_data$mental_wellness_index_0_100,
+  (train_data$self_employed),
+  train_data$sleep_quality_1_5
+)
+
+colnames(xb) <- c("scr time", "stress lvl", "exercise", "mental ", "self_empl", "sleep_qual")
+
+boxplot(xb,names=c("scr time", "stress lvl", "exercise", "mental ", "self_empl", "sleep_qual"),las=2)
+
+xb_scaled <- scale(xb)
+boxplot(xb_scaled, las=2, col="lightblue")
+
+
+```
+<div class="t1"         >
+
+We plot boxplots to identify which independent variables contain influential outliers that may require attention or removal. We observe that this is the case for mental wellness.
+</div>
+```{r,message=FALSE,warning=FALSE}
+
+#scatterplot for model 7
+pred_df <- model7$pred
+ggplot(pred_df, aes(x=obs, y=pred)) + 
+  geom_point() + 
+  geom_abline(slope=1, intercept=0, color="red") +
+  theme_minimal()
+
+
+```
+<div class="t1"         > 
+We decided to include polynomial (squared) terms for mental wellness, stress level, and screen time, as their effects on productivity may not be strictly linear. For instance, very high stress might reduce productivity disproportionately, while moderate screen time could have different impacts than very low or very high values. By including squared terms, the model can better capture such non-linear relationships. The other predictors—exercise, self-employment, and sleep quality—are kept linear, as their effects are expected to be approximately linear.
+</div>
+
+<div class="s1">
+
+Model 9
+</div>
+
+```{r,message=FALSE,warning=FALSE} 
+#We attempt to fit a polynomial model using all the significant predictors identified so far
+
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+# We train a linear model using cross-validation
+model9 <- train(
+  (productivity_0_100) ~ 
+    mental_wellness_index_0_100 + I(mental_wellness_index_0_100^2) +
+    stress_level_0_10 + I(stress_level_0_10^2) +
+    screen_time_hours + I(screen_time_hours^2) +
+    exercise_minutes_per_week +
+    self_employed+sleep_quality_1_5,
+  data = train_data,
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE" 
+)
+summary(model9)
+
+#Looking at the cross-validation results
+model9$results
+
+
+
+```
+<div class="t1"         >
+
+Although polynomial (squared) terms were included to account for possible non-linear effects of mental wellness, stress level, and screen time, the cross-validated results (RMSE, MAE, and R²) remain almost identical to the linear model. This suggests that the relationship between these predictors and productivity is largely linear in the observed data range. As a result, adding non-linear terms does not provide a meaningful improvement in predictive performance and only increases model complexity.
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+# applying a statistical test to detect potential outliers in the predictors
+
+outlierTest(model7$finalModel)
+
+```
+<div class="t1"         >
+
+Based on the metrics across these models, we conclude that Model 7 performs best in the k-fold cross-validation. We will now attempt to remove outliers from this model and compare the results.
+</div>
+
+
+<div class="s1">
+
+Model 10
+</div>
+```{r,message=FALSE,warning=FALSE}
+set.seed(123)
+train_control <- trainControl(method = "cv", number = 10,savePredictions = "all")   #function from caret
+
+# We train a linear model using cross-validation
+model10 <- train(
+  productivity_0_100~ . -leisure_screen_hours - work_screen_hours - sleep_hours - social_hours_per_week - age - gender - work_mode - occupation + self_employed,
+  data = train_data[-c(212),],
+  method = "lm",
+  trControl = train_control,
+  metric = "RMSE"  
+)
+summary(model10)
+
+#Looking at the cross-validation results
+model10$results
+
+```
+
+<div class="t1"         >
+
+To assess the robustness of the model, we remove a single influential observation identified in the diagnostic analysis and re-estimate the model. The results show a slight improvement in performance metrics, indicating that the model is not overly sensitive to individual data points. This suggests a reasonable level of stability and robustness in the estimated relationships.
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+#test for multicolinearity
+vif(model10$finalModel)
+
+
+```
+
+<div class="t1"         >
+
+Since the VIF function indicates multicollinearity when values exceed 5, and two of our variables show VIFs above this threshold, we need to adjust the model. We will attempt to address this by applying regularized regression to control the coefficients.
+</div>
+
+<div class="s1">
+
+Model 11(regularization)
+</div>
+
+<div class="t1"         >
+
+To address multicollinearity observed in the linear model, we apply Ridge regression, which reduces coefficient variance by shrinking correlated predictors rather than removing them. This allows us to retain all relevant variables while improving model stability.
+</div>
+```{r,warning=FALSE,message=FALSE}
+
+# applying Ridge regression to reduce multicollinearity
+lambda_grid <- expand.grid(
+  alpha  = 0,
+  lambda = 10^seq(-4, 4, length = 100)
+)
+set.seed(123)
+
+ridge1 <- train(
+  (productivity_0_100) ~ . 
+    - leisure_screen_hours - work_screen_hours - sleep_hours 
+    - social_hours_per_week - age - gender - work_mode 
+    - occupation + self_employed,
+  data = train_data[-c(212),],
+  method = "glmnet",
+  trControl = train_control,
+  tuneGrid  = lambda_grid,
+  metric    = "RMSE"
+)
+
+best_lambda <- ridge1$bestTune$lambda
+
+ridge_results <- subset(
+  ridge1$results,
+  lambda == best_lambda
+)
+
+#We report the model performance metrics
+ridge_results
+
+```
+
+<div class="t1"         >
+
+We chose Ridge regression to address multicollinearity because it shrinks the coefficients of correlated predictors without eliminating them. Unlike Lasso, which can set some coefficients exactly to zero, Ridge allows us to retain all theoretically important predictors while improving model stability and reducing variance.
+</div>
+```{r,message=FALSE,warning=FALSE}
+#The model coefficients are now adjusted through Ridge regularization, reducing the magnitude of correlated predictors and improving stability
+
+ridge_coef<-coef(ridge1$finalModel,s=ridge1$bestTune$lambda)
+print(ridge_coef)
+
+
+```
+```{r,message=FALSE,warning=FALSE}
+
+coef_df <- data.frame(
+  Variable = rownames(as.matrix(ridge_coef)),
+  Coefficient = as.numeric(ridge_coef)
+)
+
+coef_df <- coef_df[-1, ]
+
+ggplot(
+  coef_df,
+  aes(
+    x = reorder(Variable, abs(Coefficient)),
+    y = Coefficient
+  )
+) +
+  geom_col() +
+  coord_flip() +
+  labs(
+    title = "Ridge Coefficient Magnitudes",
+    x = "",
+    y = "Coefficient"
+  ) +
+  theme_minimal()
+
+
+```
+<div class="t1"         >
+
+The Ridge regression coefficients reflect the direction of association between predictors and productivity after accounting for multicollinearity. Due to regularization, coefficient magnitudes are shrunk and should not be interpreted in the same way as in ordinary least squares regression. However, the overall pattern remains consistent: screen time and stress are negatively associated with productivity, while mental wellness, sleep quality, and self-employment show positive associations. Exercise appears to have a negligible effect. Overall, Ridge regression improves model stability by reducing the impact of correlated predictors without removing variables from the model.
+</div>
+
+<div class="s1">
+Model 12 (Random Forest)
+</div>
+
+<div class="t1">
+
+As a final benchmark, we estimate a Random Forest model using the same set of predictors retained in the previous specifications. Unlike linear and regularized regression models, Random Forest does not require the relationship between predictors and productivity to be specified in advance and can automatically capture nonlinear effects and interactions among variables. This provides an additional comparison between parametric and non-parametric machine learning approaches.
+
+</div>
+
+```{r,message=FALSE,warning=FALSE}
+
+
+library(randomForest)
+set.seed(123)
+
+train_control <- trainControl(
+  method = "cv",
+  number = 10,
+  savePredictions = "all"
+)
+
+rf_model <- train(
+  productivity_0_100 ~ . 
+    - leisure_screen_hours - work_screen_hours - sleep_hours 
+    - social_hours_per_week - age - gender - work_mode 
+    - occupation + self_employed,
+  data = train_data[-c(212),],
+  method = "rf",
+  trControl = train_control,
+  metric = "RMSE",
+  tuneLength = 5
+)
+
+rf_model
+rf_model$results
+
+```
+<div class="t1">
+
+The Random Forest model achieves an RMSE of approximately 6.22 and an R² of 0.823, which is slightly worse than the best-performing linear and ridge regression models. This suggests that adding nonlinear interactions and flexible tree-based structures does not improve predictive performance in this dataset.
+
+The results indicate that the relationship between behavioral variables and productivity is largely linear within the observed range, and that simpler parametric models are sufficient for capturing the main patterns in the data.
+
+</div>
+
+<div class="m1">
+Model comparison
+</div>
+```{r,message=FALSE,warning=FALSE}
+comparison <- data.frame(
+  Model = c(
+    "Model 7",
+    "Model 10",
+    "Model 11 (Ridge)",
+    "Model 12 (Random Forest)"
+  ),
+  Specification = c(
+    "Final linear specification",
+    "Outlier-adjusted linear model",
+    "Ridge regularized model",
+    "Non-parametric ML benchmark"
+  ),
+  RMSE = c(
+    5.763,
+    5.727,
+    5.753,
+    6.219
+  ),
+  R2 = c(
+    0.848,
+    0.854,
+    0.854,
+    0.823
+  ),
+  MAE = c(
+    4.637,
+    4.601,
+    4.637,
+    4.930
+  )
+)
+
+knitr::kable(
+  comparison,
+  digits = 3,
+  caption = "Comparison of Linear, Regularized, and Non-Parametric Models"
+)
+
+```
+
+
+<div class="t1">
+
+
+Model 10 achieved the lowest RMSE among linear specifications; however, Ridge regression was selected as the final model due to comparable predictive performance combined with improved stability under multicollinearity.
+
+
+</div>
+
+
+```{r,message=FALSE,warning=FALSE}
+#We extract the residuals from the final model
+
+x_train <- model.matrix(
+  productivity_0_100 ~ . 
+    - leisure_screen_hours - work_screen_hours - sleep_hours 
+    - social_hours_per_week - age - gender - work_mode 
+    - occupation + self_employed,
+  data = train_data[-c(212),],
+)[, -1]
+
+y_train <- train_data[-c(212),]$productivity_0_100
+
+y_hat <- as.numeric(
+  predict(ridge1$finalModel, x_train, s = ridge1$bestTune$lambda)
+)
+
+resid <- y_train - y_hat
+
+```
+
+
+```{r,message=FALSE,warning=FALSE}
+# creating plots
+
+par(mfrow = c(2, 2))
+
+# 1. Residuals vs Fitted
+plot(
+  y_hat, resid,
+  xlab = "Fitted values",
+  ylab = "Residuals",
+  main = "Residuals vs Fitted"
+)
+abline(h = 0, col = "red")
+
+# 2. Normal Q-Q
+qqnorm(resid, main = "Normal Q-Q")
+qqline(resid, col = "red")
+
+# 3. Scale-Location
+plot(
+  y_hat,
+  sqrt(abs(resid)),
+  xlab = "Fitted values",
+  ylab = "sqrt(|Residuals|)",
+  main = "Scale-Location"
+)
+
+
+```
+<div class="t1"         >
+
+The residuals versus fitted values plot appears satisfactory. There may be a slight indication of heteroskedasticity, but it is negligible and would not be corrected by simple transformations such as log or square root. Overall, the residuals are evenly distributed around zero, and the trend line is largely straight. The Q-Q plot also shows a good fit, with only minor deviations at the extremes. Similarly, the scale-location plot does not indicate any major model inadequacies. Based on these diagnostics, we are confident in proceeding to test the model on completely new data.
+</div>
+
+<div class="m1">
+
+Final model evaluation
+</div>
+```{r,message=FALSE,warning=FALSE}
+
+#We will now test the best model on the test set
+set.seed(123)
+test_data$self_employed <- ifelse(test_data$occupation == "Self-employed", 1, 0)
+
+x_test <- model.matrix(
+  productivity_0_100 ~ . - leisure_screen_hours - work_screen_hours - sleep_hours
+    - social_hours_per_week - age - gender - work_mode - occupation + self_employed,
+  data = test_data
+)[,-1]
+
+pred_test <- as.numeric(
+  predict(
+    ridge1$finalModel,
+    newx = x_test,
+    s = best_lambda
+  )
+)
+
+y_test<-test_data$productivity_0_100
+
+R2_test <- 1 - sum((y_test - pred_test)^2) /
+                  sum((y_test - mean(y_test))^2)
+
+MAE<-mean(abs(y_test-pred_test))
+
+
+MAPE <- mean(abs((y_test - pred_test) / y_test)) * 100
+R2_test
+MAE
+MAPE
+
+plot(y_test, pred_test,
+     xlab = "Observed productivity",
+     ylab = "Predicted productivity",
+     main = "Test set: Observed vs Predicted")
+
+abline(a = 0, b = 1, col = "red", lwd = 2)
+fit_line <- lm(pred_test ~ y_test)
+abline(fit_line, col="blue", lwd=2)
+
+
+
+```
+<div class="t1"         >
+
+The final ridge regression model evaluated on the independent test set achieved R² = 0.877, MAE = 4.24, and MAPE = 8.99. The performance is consistent with the cross-validation results, suggesting that the model generalizes well to unseen data without noticeable overfitting. Errors remain relatively low across both absolute and percentage-based metrics, indicating stable predictive performance across the observed range of productivity values.
+</div>
+
+<div class="m1">
+Conclusion
+</div>
+
+<div class="t1">
+
+Overall, the analysis shows that productivity can be reasonably well predicted using a relatively small set of behavioral and psychological variables. Across all models, stress level and screen time are consistently associated with lower productivity, while mental wellbeing and sleep quality show positive relationships.
+
+The similarity between cross-validation and test performance suggests that the models generalize well and are not strongly overfitted to the training data. In particular, Ridge regression improves stability in the presence of correlated predictors without noticeably affecting predictive performance.
+
+Overall, the results are consistent across different specifications, which increases confidence that the observed relationships are not driven by model choice or data noise.
+</div>
+
+<div class="m1">
+
+Limitations
+
+</div>
+
+<div class="t1">
+
+- The analysis is based on observational data, so findings should be interpreted as associations rather than causal effects.  
+- Several key variables are self-reported, which may introduce measurement error and subjective bias.  
+- Although multicollinearity was addressed using Ridge regression, some correlation between predictors may still affect interpretability.  
+- The dataset does not include external factors such as workload intensity, job characteristics, or personality traits, which may influence productivity.  
+- The Random Forest model was not extensively tuned, so its performance may not fully reflect its potential.  
+
+</div>
